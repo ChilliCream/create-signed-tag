@@ -1,0 +1,100 @@
+name: Create Signed Tag
+description: Create an annotated tag via the GitHub Git Data API. When authenticated as a GitHub App installation, GitHub server-signs the tag object so it shows as verified.
+
+inputs:
+  github_token:
+    description: "GitHub App installation token (e.g. from actions/create-github-app-token). Needs `contents: write`."
+    required: true
+  tag:
+    description: Tag name (e.g. v1.2.3).
+    required: true
+  sha:
+    description: Commit SHA the tag should point to.
+    required: true
+  message:
+    description: Annotated tag message. Defaults to the tag name.
+    required: false
+    default: ""
+  repository:
+    description: Target repository in `owner/repo` form. Defaults to GITHUB_REPOSITORY.
+    required: false
+    default: ""
+  force:
+    description: If `true`, move an existing tag ref to the new tag object. If `false`, fail when the tag already exists.
+    required: false
+    default: "true"
+
+outputs:
+  sha:
+    description: SHA of the created tag object.
+    value: ${{ steps.tag.outputs.result }}
+
+runs:
+  using: composite
+  steps:
+    - id: tag
+      uses: actions/github-script@v9
+      env:
+        INPUT_TAG: ${{ inputs.tag }}
+        INPUT_SHA: ${{ inputs.sha }}
+        INPUT_MESSAGE: ${{ inputs.message }}
+        INPUT_REPOSITORY: ${{ inputs.repository }}
+        INPUT_FORCE: ${{ inputs.force }}
+      with:
+        github-token: ${{ inputs.github_token }}
+        result-encoding: string
+        script: |
+          const tag = process.env.INPUT_TAG;
+          const targetSha = process.env.INPUT_SHA;
+          const message = process.env.INPUT_MESSAGE || tag;
+          const force = process.env.INPUT_FORCE === 'true';
+
+          if (!tag) {
+            core.setFailed('`tag` is required.');
+            return '';
+          }
+          if (!targetSha) {
+            core.setFailed('`sha` is required.');
+            return '';
+          }
+
+          let owner = context.repo.owner;
+          let repo = context.repo.repo;
+          if (process.env.INPUT_REPOSITORY) {
+            const [o, r] = process.env.INPUT_REPOSITORY.split('/');
+            if (!o || !r) {
+              core.setFailed("`repository` must be in 'owner/repo' form.");
+              return '';
+            }
+            owner = o;
+            repo = r;
+          }
+
+          const tagObject = await github.rest.git.createTag({
+            owner, repo,
+            tag,
+            message,
+            object: targetSha,
+            type: 'commit',
+          });
+          core.info(`Created tag object ${tagObject.data.sha} for ${tag} -> ${targetSha}`);
+
+          try {
+            await github.rest.git.updateRef({
+              owner, repo,
+              ref: `tags/${tag}`,
+              sha: tagObject.data.sha,
+              force,
+            });
+            core.info(`Updated ref refs/tags/${tag} -> ${tagObject.data.sha}`);
+          } catch (e) {
+            if (e.status !== 422) throw e;
+            await github.rest.git.createRef({
+              owner, repo,
+              ref: `refs/tags/${tag}`,
+              sha: tagObject.data.sha,
+            });
+            core.info(`Created ref refs/tags/${tag} -> ${tagObject.data.sha}`);
+          }
+
+          return tagObject.data.sha;
