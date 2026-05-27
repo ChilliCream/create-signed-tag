@@ -70,6 +70,32 @@ runs:
             repo = r;
           }
 
+          let existingRef = null;
+          try {
+            const { data } = await github.rest.git.getRef({
+              owner, repo,
+              ref: `tags/${tag}`,
+            });
+            existingRef = data;
+          } catch (e) {
+            if (e.status !== 404) throw e;
+          }
+
+          if (existingRef) {
+            let pointedSha = existingRef.object.sha;
+            if (existingRef.object.type === 'tag') {
+              const { data: existingTag } = await github.rest.git.getTag({
+                owner, repo,
+                tag_sha: existingRef.object.sha,
+              });
+              pointedSha = existingTag.object.sha;
+            }
+            if (pointedSha === targetSha) {
+              core.info(`Tag ${tag} already points to ${targetSha}. No-op.`);
+              return existingRef.object.sha;
+            }
+          }
+
           const tagObject = await github.rest.git.createTag({
             owner, repo,
             tag,
@@ -79,7 +105,7 @@ runs:
           });
           core.info(`Created tag object ${tagObject.data.sha} for ${tag} -> ${targetSha}`);
 
-          try {
+          if (existingRef) {
             await github.rest.git.updateRef({
               owner, repo,
               ref: `tags/${tag}`,
@@ -87,8 +113,7 @@ runs:
               force,
             });
             core.info(`Updated ref refs/tags/${tag} -> ${tagObject.data.sha}`);
-          } catch (e) {
-            if (e.status !== 422) throw e;
+          } else {
             await github.rest.git.createRef({
               owner, repo,
               ref: `refs/tags/${tag}`,
