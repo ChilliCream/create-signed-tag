@@ -43,6 +43,7 @@ runs:
       with:
         github-token: ${{ inputs.github_token }}
         result-encoding: string
+        retries: 3
         script: |
           const tag = process.env.INPUT_TAG;
           const targetSha = process.env.INPUT_SHA;
