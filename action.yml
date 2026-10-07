@@ -95,6 +95,10 @@ runs:
               core.info(`Tag ${tag} already points to ${targetSha}. No-op.`);
               return existingRef.object.sha;
             }
+            if (!force) {
+              core.setFailed(`Tag ${tag} already exists at ${pointedSha}.`);
+              return '';
+            }
           }
 
           const tagObject = await github.rest.git.createTag({
